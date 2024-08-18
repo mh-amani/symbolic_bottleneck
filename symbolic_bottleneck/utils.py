@@ -13,7 +13,7 @@ def instantiate_from_config(config):
     if 'pretrained_model_name' in config:
         pretrained_model_name = config['pretrained_model_name']
         # Instantiate the pre-trained model
-        instance = cls.from_pretrained(pretrained_model_name, config.get('config', None))
+        instance = cls.from_pretrained(pretrained_model_name,)
     else:
         # Instantiate the class with the remaining config parameters    
         if config.get('config', None):

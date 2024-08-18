@@ -1,92 +1,66 @@
 from blocks.modules.model_unwrapper.transformer_enc_dec_unwrapper import EncoderDecoderUnwrapper
-from blocks.modules.discrete_bottlenecks.softmax import SoftmaxDiscreteBottleneck
-from transformers import BartForConditionalGeneration
-from blocks.utils import instantiate_from_config
+from transformers import BartConfig
+import torch
+
+# to find out what token should be prepended when generating output labels, we pass as text_target the input text
+    # prefix_ids_fr = tokenizer(text_target="", return_tensors="pt")['input_ids']
+    # tokenizer.vocab['</s>']: 2, tokenizer.vocab['en_XX']: 250004, tokenizer.vocab['fr_XX']: 250008
 
 # example config for bart
-# config_bart = {
-#     '_target_': 'transformers.BartForConditionalGeneration',
-#     'vocab_size': 50265,
-#     'max_position_embeddings': 1024,
-#     'encoder_layers': 12,
-#     'encoder_ffn_dim': 4096,
-#     'encoder_attention_heads': 16,
-#     'decoder_layers': 12,
-#     'decoder_ffn_dim': 4096,
-#     'decoder_attention_heads': 16,
-#     'encoder_layerdrop': 0.0,
-#     'decoder_layerdrop': 0.0,
-#     'activation_function': 'gelu',
-#     'd_model': 1024,
-#     'init_std': 0.02,
-#     'eos_token_id': 2,
-#     'pad_token_id': 1,
-#     'bos_token_id': 0,
-#     'attention_dropout': 0.1,
-#     'activation_dropout': 0.1,
-#     'dropout': 0.1,
-#     'classifier_dropout': 0.1,
-#     'scale_embedding': False,
-#     'use_cache': True,
-#     'num_labels': 3,
-#     'forced_eos_token_id': 2,
-#     }
-
+config_bart = {
+        '_target_': 'transformers.BartForConditionalGeneration',
+        'config': BartConfig(d_model=128, encoder_layers=3, decoder_layers=3, 
+                             vocab_size=23, max_position_embeddings=40,
+                             encoder_attention_heads=2, decoder_attention_heads=2)
+        }
+    
+discretizer_config = {
+    '_target_': 'blocks.modules.discrete_bottlenecks.softmax.SoftmaxDiscreteBottleneck',
+    'config':{ 
+        'dimensions': None,
+        'quantize_vector': True, 'temperature': 1.0,
+        'encoder_embedding_trainable': False, 'decoder_embedding_trainable': False, 
+        'linear_head_trainable': False, 
+        'encoder_embedding': None, 'decoder_embedding': None, 
+        'linear_head': None,
+        }
+    }
 
 
 ########################################################################################################################
 # unwrapped models
 
-def Unwrappedbart(bart_config, discretizer_enc_config, discretizer_dec_config):
-    model = instantiate_from_config(bart_config)
-    
-    vector_model, encoder_embedding, decoder_embedding, linear_head = EncoderDecoderUnwrapper(model).values()
-    vocab_size = vector_model.config.vocab_size 
-    embed_dim = vector_model.config.d_model
-    dimensions = {'decoder_embedding_dim': embed_dim, 'vocab_size': vocab_size, 
-                  'encoder_embedding_dim': embed_dim, 'unembedding_dim': vocab_size}
-    disc_config = {'dimensions': dimensions, 'encoder_embedding': encoder_embedding,
-                     'decoder_embedding': decoder_embedding, 'linear_head': linear_head}
-    discretizer_enc_config['config'].update(disc_config)
-    discretizer_dec_config['config'].update(disc_config)
-    discretizer_enc = instantiate_from_config(discretizer_enc_config)
-    discretizer_dec = instantiate_from_config(discretizer_dec_config)
+def UnwrappedBartTest():
 
-    return {
-        'model': model, 'vector_model': vector_model,
-        'discretizer_enc': discretizer_enc, 'discretizer_dec': discretizer_dec,}
+    model, vector_model, discretizer, _ = EncoderDecoderUnwrapper(config_bart, discretizer_config, discretizer_config).values()
+    model.eval()
+    vector_model.eval()
 
+    random_token_input_batch = torch.randint(0, 23, (4, 10))
+    random_token_output_batch = torch.randint(0, 23, (4, 15))
+    random_token_output_batch[:, 0] = 2 # prepend the <s> token
+    random_token_output_batch[:, 14] = 1 # append the </s> token
 
-def UnwrappedMbart(model_name="facebook/mbart-large-50-many-to-many-mmt"):
-    """
-    Unwraps the MBART model to get the encoder and decoder weights.
-    Returns:
-    """
-    from transformers import MBartForConditionalGeneration
-    model = MBartForConditionalGeneration.from_pretrained(model_name)
+    input_vector_embeddings = discretizer.encoder_embedding_from_id(random_token_input_batch)
+    output_vector_embeddings = discretizer.decoder_embedding_from_id(random_token_output_batch)
 
-    vector_model, encoder_embedding, decoder_embedding, linear_head = EncoderDecoderUnwrapper(model).values()
-    vocab_size = vector_model.config.vocab_size
-    embed_dim = vector_model.config.d_model
+    output_model = model(input_ids=random_token_input_batch, decoder_input_ids=random_token_output_batch, 
+                         return_dict=True, output_hidden_states=True)
+    output_vector_model = vector_model.forward(inputs_embeds=input_vector_embeddings, decoder_inputs_embeds=output_vector_embeddings,
+                                            return_dict=True, output_hidden_states=True)
+    discretized_output = discretizer(output_vector_model['last_hidden_state'])
 
-    discretizer_enc = SoftmaxDiscreteBottleneck({'dimensions': {'decoder_embedding_dim': embed_dim, 'vocab_size': vocab_size, 'encoder_embedding_dim': embed_dim, 'unembedding_dim': vocab_size},
-                                'quantize_vector': True, 'temperature': 1.0,
-                                'encoder_embedding_trainable': False, 'decoder_embedding_trainable': False, 'linear_head_trainable': False,
-                                'encoder_embedding': encoder_embedding, 'decoder_embedding': decoder_embedding,
-                                'linear_head': linear_head,})
-    discretizer_dec = SoftmaxDiscreteBottleneck({'dimensions': {'decoder_embedding_dim': embed_dim, 'vocab_size': vocab_size, 'encoder_embedding_dim': embed_dim, 'unembedding_dim': vocab_size},
-                                'quantize_vector': True, 'temperature': 1.0,
-                                'encoder_embedding_trainable': False, 'decoder_embedding_trainable': False, 'linear_head_trainable': False,
-                                'encoder_embedding': encoder_embedding, 'decoder_embedding': decoder_embedding,
-                                'linear_head': linear_head,})
-    
-    return {
-        'model': model, 'vector_model': vector_model,
-        'discretizer_enc': discretizer_enc, 'discretizer_dec': discretizer_dec,}
+    print("input token batch:", random_token_input_batch)
+    print("output token batch:", random_token_output_batch)
+    print("decoded output original model:", output_model.logits.argmax(dim=-1))
+    print("decoded output decomposed model:", discretized_output['id'])
+    print("logits are the same:", torch.allclose(discretized_output['logit'], output_model.logits, atol=1e-1))
+
 
 
 
 ########################################################################################################################
 # Autoreg-wrapped model
 
-
+if __name__ == '__main__':
+    UnwrappedBartTest()

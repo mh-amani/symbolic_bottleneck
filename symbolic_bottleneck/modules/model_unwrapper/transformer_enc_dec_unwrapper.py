@@ -1,11 +1,40 @@
 import torch 
-from typing import Optional
-from transformers import PreTrainedModel, EncoderDecoderModel
-from transformers import MBartForConditionalGeneration, BartForConditionalGeneration
-from blocks.modules.discrete_bottlenecks.softmax import SoftmaxDiscreteBottleneck
+from blocks.utils import instantiate_from_config
+
+def EncoderDecoderUnwrapper(model_config, discretizer_enc_config, discretizer_dec_config):
+    """
+    Unwraps the encoder-decoder model to get the encoder and decoder weights.
+    Args:   
+        model_config: The configuration object for the model.
+        discretizer_enc_config: The configuration object for the encoder discretizer.
+        discretizer_dec_config: The configuration object for the decoder discretizer.
+    Returns:
+        model: The encoder-decoder model.
+        vector_model: The encoder-decoder model without embedding and head, pure transfomer.
+        discretizer_enc: The encoder weights.
+        discretizer_dec: The decoder weights.
+    """
+
+    model = instantiate_from_config(model_config)
+    
+    vector_model, encoder_embedding, decoder_embedding, linear_head = EncoderDecoderUnwrapperFromModel(model).values()
+    vocab_size = vector_model.config.vocab_size 
+    embed_dim = vector_model.config.d_model
+    dimensions = {'decoder_embedding_dim': embed_dim, 'vocab_size': vocab_size, 
+                  'encoder_embedding_dim': embed_dim, 'unembedding_dim': vocab_size}
+    disc_config = {'dimensions': dimensions, 'encoder_embedding': encoder_embedding,
+                     'decoder_embedding': decoder_embedding, 'linear_head': linear_head}
+    discretizer_enc_config['config'].update(disc_config)
+    discretizer_dec_config['config'].update(disc_config)
+    discretizer_enc = instantiate_from_config(discretizer_enc_config)
+    discretizer_dec = instantiate_from_config(discretizer_dec_config)
+
+    return {
+        'model': model, 'vector_model': vector_model,
+        'discretizer_enc': discretizer_enc, 'discretizer_dec': discretizer_dec,}
 
 
-def EncoderDecoderUnwrapper(enc_dec_model):
+def EncoderDecoderUnwrapperFromModel(enc_dec_model):
     """
     Unwraps the encoder-decoder model to get the encoder and decoder weights.
     Args:
@@ -46,7 +75,7 @@ def EncoderDecoderUnwrapper(enc_dec_model):
     try:
         vector_model = enc_dec_model.model
     except:
-        vector_model = None
+        vector_model = enc_dec_model
     return {'vector_model': vector_model, 'encoder_embedding': encoder_embedding, 
         'decoder_embedding': decoder_embedding, 'linear_head': linear_head} 
 

@@ -27,7 +27,7 @@ class AbstractDiscreteLayer(nn.Module):
         self.vocab_size = config['dimensions']['vocab_size']
         self.decoder_embedding_dim = config['dimensions']['decoder_embedding_dim']
         self.unembedding_dim = config['dimensions']['unembedding_dim']
-
+        self.linear_head_scale = config.get('linear_head_scale', 1.0)
         self.quantize_vector = config['quantize_vector']
 
         self.temperature = config.get('temperature', 1.0)
@@ -74,6 +74,7 @@ class AbstractDiscreteLayer(nn.Module):
         
     def forward(self, x,**kwargs):
         continous_vector = self.linear_head(x)
+        continous_vector = continous_vector * self.linear_head_scale
         # scores are between 0 and 1, and sum to 1 over the vocab dimension.
         discrete_output  = self.discretize(continous_vector,**kwargs)
         # discrete_output usually has id, score, logit, quantized_vector, quantization_loss

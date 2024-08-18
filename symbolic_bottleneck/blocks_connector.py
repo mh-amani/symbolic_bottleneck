@@ -1,7 +1,6 @@
 from typing import Any, Dict, Tuple
 import torch
 from torch.nn import ModuleDict, Module
-from transformers import MBart50TokenizerFast  
 from blocks.unwrapped_models.enc_dec_unwrapper import UnwrappedMbart
 from blocks.modules.auto_reg_wrapper import AutoRegWrapper
 
